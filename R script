@@ -1,0 +1,444 @@
+## R Script
+## Biomarker data and absolute lymphocyte counts were first log-transformed
+## All p-values were multiple testing adjusted: dataframe$adj_p <- p.adjust(dataframe$p_values, method = "BH")
+
+# Figure 1A: Kaplan-Meijer 30-day mortality
+# Load necessary packages
+Library(survival)
+
+p <- ggsurvplot(survfit(Surv(days_survived,day30_mortality) ~ lymphocyte_grouping, data = dataframe), 
+                break.time.by = 10,
+                conf.int = F,
+                xlab = "Survival days", 
+                ylab = "Survivor probability", 
+                legend.labs = c("No lymphopenia", "Mild lymphopenia", "Severe lymphopenia"),
+                palette =c("#4DAF4A", "#984EA3", "#377EB8"),
+                pval = T,
+                risk.table = T,
+                risk.table.title = "",
+                fontsize = 3,
+                xlim = c(0,31))
+
+p
+
+# Figure 1B + C: non-linear mortality relationship
+## first check linearity 
+library(rms)
+unadj_lympho <- lrm(day30_mortality ~ rcs(Lymphocyte_count, 3), data= dataframe)
+anova(unadj_lympho)
+
+# Load necessary packages
+library(ggplot2)
+library(scales)
+
+# Define data preparation, needed for rms package
+d <- datadist(dataframe)
+options(datadist = "d")
+
+# Define unadjusted analysis
+unadj_lympho <- lrm(day30_mortality ~ rcs(Lymphocyte_count, 3), data = dataframe)
+
+# Update datadist for adjustment
+d$limits["Adjust to", "Lymphocyte_count"] <- 1
+unadj_lympho <- update(unadj_lympho)
+x1 <- Predict(unadj_lympho, Lymphocyte_count, ref.zero = TRUE, fun = exp)
+
+## Predict change from 1.0 to 0.5 for unadjusted analysis
+Predict(unadj_lympho, ref.zero = T, Lymphocyte_count = 0.5, fun = exp)
+
+# Create ggplot for unadjusted analysis
+x3 <- ggplot(x1) +
+  xlab("Lymphocyte count") +
+  ylab("30-day Mortality Odds ratio") +
+  theme_bw() +
+  theme(legend.position = "bottom", panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_vline(xintercept = 1, linetype = 'dotted', col = 'purple') +
+  geom_vline(xintercept = 0.5, linetype = 'dotted', col = 'blue') +
+  scale_x_continuous(breaks = c(0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2.0, 2.25), 
+                     name = "Lymphocyte count", limits = c(0.25, 2.25)) +
+  scale_y_continuous(breaks = c(0.75, 1, 2.5, 5, 7.5, 10, 12.5)) +
+  coord_trans(y = 'log') 
+x3
+
+# Define adjusted analysis
+adj_lymf <- lrm(day30_mortality ~ + age + inclusion_hospital + wave2 + wave3 + wave4 + sex +
+                  malignancy + chronic_immunosupression + anti_il6_treatment + remdesivir_treatment + imatinib_treatment + cortico_treatment + antibiotic_treatment + rcs(Lymphocyte_count, 3), data = dataframe)
+
+# Summary of adjusted analysis
+d$limits["Adjust to", "Lymphocyte_count"] <- 1
+adj_lymf <- update(adj_lymf)
+x1 <- Predict(adj_lymf, Lymphocyte_count, ref.zero = TRUE, fun = exp)
+
+## Predict change from 1.0 to 0.5 for adjusted analysis
+Predict(adj_lymf, ref.zero = TRUE, Lymphocyte_count = 0.5, fun = exp)
+
+# Create ggplot for adjusted analysis
+x3 <- ggplot(x1) +
+  xlab("Lymphocyte count") +
+  ylab("30-day Mortality Odds ratio") +
+  theme_bw() +
+  theme(legend.position = "bottom", panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_vline(xintercept = 1, linetype = 'dotted', col = 'purple') +
+  geom_vline(xintercept = 0.5, linetype = 'dotted', col = 'blue') +
+  scale_x_continuous(breaks = c(0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2.0, 2.25), 
+                     name = "Lymphocyte count", limits = c(0.25, 2.25)) +
+  coord_trans(y = 'log')  +
+  scale_y_continuous(breaks = c(0.75, 1, 2.5, 5, 7.5, 10)) 
+x3
+
+
+# Figure 2: PCA analysis per domain (endothelial as example) 
+p_load(vegan, devtools, ggibplot)
+endo <- dataframe[c("endo biomarker1", 
+ "endo biomarker2", ….. , “ lymphocyte_grouping")]
+                          
+##
+Groups <-endo[,"lymphocyte_grouping "]
+e.pca <- prcomp(endo[ ,1:#number of markers], center = T, scale. = T) 
+
+colors <- c("#4DAF4A", "#984EA3", "#377EB8")
+e.plot1<-ggbiplot(e.pca,  ellipse=F, obs.scale = 1, var.scale = 1,var.axes=T, group=Groups,
+                  circle = F, varname.size=2.0, alpha=0, varname.adjust=c(1))+
+  scale_color_manual(name="Groups",values=colors)+
+  stat_ellipse(aes(colour=Groups), size = 1, type="norm", level = 0.10)+
+  coord_fixed(xlim=c(-3,3), ylim=c(-3, 3))+
+  theme_bw()  +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  theme(text = element_text(size = 8),
+        axis.title = element_text(size = 8),
+        axis.text.x=element_text(size = 8),
+        axis.text.y=element_text(size = 8), 
+        legend.position = "none")+
+  scale_y_continuous(breaks=seq(-3, 3, by = 1)) +
+  ggtitle("Endothelial and coagulation response")
+e.plot1
+
+## significance PC’s
+pcdat <- as.data.frame(e.pca[["x"]])
+pcdat$group <- Groups
+summary(aov(pcdat$PC1 ~ pcdat$group))
+summary(aov(pcdat$PC2 ~ pcdat$group))
+
+
+## Heatmap figure 3 with p-values
+Construction of hedges g heatmap
+effect_size1 <- low_vs_normal %>%
+  group_by(domain, variable) %>%
+  cohens_d(value ~ lymphocyte_grouping, hedges.correction = T, var.equal = F) %>% as.data.frame() %>%
+  mutate(effsize_2 = ifelse(effsize > -0.2 & effsize < 0.2, 0, effsize),
+         effsize_cat = cut(effsize,
+                           breaks = c(-Inf, -1.5, -0.8, -0.5, -0.2, 0.2, 0.5, 0.8, 1.5, Inf),
+                           labels = c("Very large decrease (<-1.5)", "Large decrease (<-0.8)", "Moderate decrease (<-0.5)",
+                                      "Small decrease (<-0.2)", "Negligible difference", "Small increase (>0.2)",
+                                      "Moderate increase (>0.5)", "Large increase (>0.8)", "Very large increase (>1.5)")) %>% as.factor())
+effect_size1$comparison <- 1
+
+effect_size2 <- verylow_vs_normal %>%
+  group_by(domain, variable) %>%
+  cohens_d(value ~ lymphocyte_grouping, hedges.correction = T, var.equal = F) %>% as.data.frame() %>%
+  mutate(effsize_2 = ifelse(effsize > -0.2 & effsize < 0.2, 0, effsize),
+         effsize_cat = cut(effsize,
+                           breaks = c(-Inf, -1.5, -0.8, -0.5, -0.2, 0.2, 0.5, 0.8, 1.5, Inf),
+                           labels = c("Very large decrease (<-1.5)", "Large decrease (<-0.8)", "Moderate decrease (<-0.5)",
+                                      "Small decrease (<-0.2)", "Negligible difference", "Small increase (>0.2)",
+                                      "Moderate increase (>0.5)", "Large increase (>0.8)", "Very large increase (>1.5)")) %>% as.factor())
+effect_size2$comparison <- 2
+
+## combine
+effect_size <- rbind(effect_size1, effect_size2)
+
+## wide matrix
+test <- effect_size %>% select(domain, variable, effsize, comparison) %>%
+  pivot_wider(names_from = "comparison", values_from = effsize)
+
+## change colors 
+input <- as.matrix(test[ , c(-1, -2)])
+input_save <- input
+rownames(input_save) <- test$variable
+input[input >-0.2 & input <0.2] <- 0
+rownames(input) <- test$variable
+
+##
+p_load(circlize)
+min(input)
+max(input)
+col_fun = colorRamp2(breaks=c(-0.6, 0, 0.3, 1.5), colors= c("#334B97","white", "red", "darkred"))
+
+dis_hm <- Heatmap(input, col = col_fun,
+                  column_title_gp = gpar(size=6, fontface="bold"), show_column_names = T, column_names_rot = 0,
+                  show_row_names = T, show_row_dend = F, show_column_dend = F, row_names_side = "right",
+                  row_names_gp = gpar(fontsize = 8), cluster_rows = F, cluster_columns = F,
+                  border=T,
+                  row_order = order2,
+                  row_split = factor(test$domain, levels = c("Endothelial and coagulation activation", "Inflammation and organ damage","Chemokine", "Cytokines")),
+                  cluster_row_slices = F,
+                  heatmap_legend_param = list(at = c(-0.8, -0.5, -0.2, 0, 0.2, 0.8, 1.5),
+                                              labels = c("<-0.8", "<-0.5", "<-0.2",  ">-0.2 & <0.2",  ">0.2", ">0.8", ">1.5"),
+                                              title = "Hedges' g", color_bar = "discrete", fontsize = 8),
+                  row_title_rot = 0, row_title_gp = gpar(fontsize = 8, fontface="bold"),
+                  column_names_gp = gpar(fontsize = 8, fontface="bold"),
+                  rect_gp = gpar(col = "black", lwd = 0.5),
+                  border_gp = gpar(col = "black", lwd = 1))
+
+dis_hm
+
+
+## Significance Figure 3 
+# 1. Check linearity biomarkers and lymphocyte counts using a loop and for non-linear markers calculate p-value with lymphocyte counts
+## linearity
+p_load(rms)
+linearity <- function(x){ 
+  pvalue_linear <- anova(ols(x ~ rcs(Lymphocyte_counts, 3), data =dataframe))[2,5]
+  pvalue_lympho <- anova(ols(x ~ rcs(Lymphocyte_counts, 3), data =dataframe))[1,5]
+  vec <- c( pvalue_linear, pvalue_lympho)
+  names(vec) <- c("non-linearity", "pvalue_lympho")
+  return(vec )
+}
+P<0.05 of the linear term indicating non-linearity
+
+# 2. unadjusted p-value lymphocyte for linear marker
+regression <- function(x){
+  reg <- anova(lm(x ~ Lymphocyte_counts, data = dataframe))[1,5]
+  vec <- reg
+  names(vec) <- c("p_value")
+  return(vec)
+}
+
+# 3. Adjusted models non-linear markers + linear markers 
+linearity <- function(x){ 
+  linear <- anova(ols(x ~ age + inclusion_hospital + wave2 + wave3 + wave4 + sex +
+                      malignancy + chronic_immunosupression   + anti_IL6_before_sampling + imatinib_before_sample + dexa_before_sample + other_cortico_before_sample + rcs(Lymphocyte_counts, 3) , data =dataframe))[14,5]
+
+  pvalue_lympho <- anova(ols(x ~ age + inclusion_hospital + wave2 + wave3 + wave4 + sex +
+                      malignancy + chronic_immunosupression   + anti_IL6_before_sampling + imatinib_before_sample + dexa_before_sample + other_cortico_before_sample + rcs(Lymphocyte_counts, 3), data =dataframe))[13,5]
+
+  vec <- c(linear, pvalue_lympho)
+  names(vec) <- c("nonlinear", "pvalue_lympho")
+  return(vec )
+}
+
+regression <- function(x){
+  reg <- anova(lm(x ~  age + inclusion_hospital + wave2 + wave3 + wave4 + sex +
+                      malignancy + chronic_immunosupression   + anti_IL6_before_sampling + imatinib_before_sample + dexa_before_sample + other_cortico_before_sample + Lymphocyte_counts, data = dataframe))[13,5]
+  vec <- reg
+  names(vec) <- c("p_value")
+  return(vec)
+}
+
+# Direct comparison Figure 3 (note the minus as data is already log-transformed)
+All_data_long$lymphocyte_grouping <- factor(All_data_long$very_low_low, levels = c( "very_low", "low", "Normal"), ordered = T)
+
+tt <- function(x){
+  ttp <- t.test(x ~ low_lympho_subset$lymphocyte_grouping)$p.value
+  
+  logfc <- t.test(x ~ low_lympho_subset$lymphocyte_grouping)$estimate[2] -
+    t.test(x ~ low_lympho_subset$lymphocyte_grouping)$estimate[1]
+  
+  vec <- c(ttp,logfc)
+  names(vec) <- c("p","logfc")
+  
+  return(vec )
+}
+
+# Volcano plot
+p <- ggplot(t.tests, aes(x=log10fc, y= -log10(adj.p), label=label )) +
+  geom_point(aes(col=col, size=0.2)) +
+  scale_color_manual(values = c("A" = "grey", "B" = "blue", "C" = "red")) +
+  scale_shape_manual(values=c(16,1,16,16))+
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(face="bold", size = 15),
+        axis.title.y = element_text(face="bold",size=15),
+        axis.title.x = element_text(size=15),
+        axis.text.x = element_text(#face="bold",
+          size=13, color = "black"),
+        axis.text.y = element_text(#face="bold",
+          size=13, color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+  ylab(expression('-log'[10]*'(BH adjusted P)')) +
+  geom_hline(yintercept = 1.30103) + 
+  coord_cartesian(xlim = c(-0.5, 0.5), ylim=c(0, -log10(min(t.tests$adj.p))+1 )) +
+  geom_text_repel() +
+  xlab("LogFC") +
+  ylab(expression('-log'[10]*'(BH adjusted P)')) +
+  geom_hline(yintercept = 1.30103) + 
+  ggtitle("Mild vs severe lymphopenia") #change title
+p
+
+# Figure 4: Mortality coordinates in lymphopenic patients
+## lymphocyte derived biomarkers
+products <- c("TNF-alpha", "TNF-RI" , "Granzyme B", "CD40L", "CCL3" ,"CCL4", "CCL5", "IL2", "IL4", "IL10", "IL13", "IL17a", "IL6", "GM-CSF", "IFNg", "CXCL10")
+
+## assess linearity mortality and lymphocyte counts in subset of lymphopenic patients => linear
+library(rms)
+lympho <- lrm(day30_mortality ~ rcs(Lymphocyte_count, 3), data= low_lymf)
+anova(lympho)
+
+## assess nonlinearity biomarkers with lymphocyte counts in lymphopenic patients => all linear relationship
+linearity <- function(x){ 
+  linear <- anova(ols(x ~ rcs(Lymphocyte_counts, 3), data =low_lymf))[2,5]
+  pvalue_lympho <- anova(ols(x ~ rcs(Lymphocyte_counts, 3), data =low_lymf))[1,5]
+  vec <- c(linear, pvalue_lympho)
+  names(vec) <- c("nonlinear", "pvalue_lympho")
+  return(vec )
+}
+             
+## first check interaction => IL-10 shows an association => removed
+mortality_inter <- function(x){
+  coeff <- summary(glm(mortality_d30 ~ x *Lymphocyte_counts, data = low_lymf, family = "binomial"))[["coefficients"]][2,1]
+  p_value <- summary(glm(mortality_d30 ~ x * Lymphocyte_counts, data = low_lymf, family = "binomial"))[["coefficients"]][2,4]
+  p_value_interaction <- summary(glm(mortality_d30  ~ x *Lymphocyte_counts, data = low_lymf, family = "binomial"))[["coefficients"]][4,4]
+  vec <- c(coeff, p_value, p_value_interaction)
+  names(vec) <- c("Coefficient_mort", "p_value_mort", "p_interaction")
+  return(vec)
+}
+
+## get lymphocyte coefficient
+coefficient <- function(x){
+  coeff <- summary(lm(x ~ Lymphocyte_counts, data = low_lymf))[["coefficients"]][2,1]
+  p_value <- summary(lm(x ~ Lymphocyte_counts, data = low_lymf))[["coefficients"]][2,4]
+  vec <- c(coeff, p_value)
+  names(vec) <- c("Coefficient_lymphocyte", "p_value_lymphocyte")
+  return(vec)
+}
+
+## get percentage increase per 0.1 increase in lymphocytes
+coeff.results$percentage_lympho <- (exp(coeff.results$Coefficient_lymphocyte) - 1) * 100/10
+
+
+## mortality
+mortality <- function(x){
+  coeff <- summary(glm(mortality_d30  ~ x, data = low_lymf, family = "binomial"))[["coefficients"]][2,1]
+  p_value <- summary(glm(mortality_d30  ~ x, data = low_lymf, family = "binomial"))[["coefficients"]][2,4]
+  vec <- c(coeff, p_value)
+  names(vec) <- c("Coefficient_mort", "p_value_mort")
+  return(vec)
+}
+
+## get increase in mortality with 25% increase in biomarker
+mort.results$odds_change <- (1.25^mort.results$Coefficient_mort)
+
+## combine for plot
+importance <- merge(coeff.results, mort.results, by = "marker")
+
+# Volcano plot with coordinates
+importance$col <- "A"
+importance$col <- ifelse(importance$bh_adj_lymphocyte<0.05 & importance$bh_adj_mort <0.05, "B", importance$col)
+importance$col <- ifelse(importance$bh_adj_lymphocyte<0.05 & importance$bh_adj_mort >=0.05, "C", importance$col)
+importance$col <- ifelse(importance$bh_adj_lymphocyte>=0.05 & importance$bh_adj_mort <0.05, "D", importance$col)
+
+#label and color
+importance$label <- importance$marker
+colors <- c("#66C2A5","#FC8D62","#8DA0CB","#E78AC3","#A6D854","#FFD92F","#E5C494","#B3B3B3")
+
+# ggplot 
+library(ggplot2)
+library(ggrepel)
+importance_plot <- ggplot(importance, aes(x= odds_change,y=percentage_lympho, label=label)) +
+  geom_point(aes(col=col, size=0.5)) +
+  scale_color_manual(values = c("A" = "grey", "B" = "orange", "C" = "purple", "D" = "#A6D854")) +
+  scale_shape_manual(values=c(16,1,16,16))+
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(face="bold", size = 15),
+        axis.title.y = element_text(face="bold",size=15),
+        axis.title.x = element_text(size=15),
+        axis.text.x = element_text(#face="bold",
+          size=13, color = "black"),
+        axis.text.y = element_text(#face="bold", 
+          size=13, color = "black"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+  geom_text_repel(max.overlaps = 9999) +
+  xlab("Increase in 30-day mortality odds\n per 25% increase in biomarker") +
+  ylab(expression("Percentage increase in biomarker\n per 0.1 increase in lymphocycte counts")) +
+  geom_hline(yintercept=0, linetype='dotted', col = 'grey', size = 0.8) +
+  geom_vline(xintercept=1, linetype='dotted', col = 'grey', size = 0.8) +
+  coord_cartesian(xlim = c(0.75, 1.8)) +
+  scale_x_continuous(trans = "log", breaks = c(0.8, 1.00, 1.2, 1.4, 1.6, 1.8, 2.0)) +
+  scale_y_continuous(lim = c(-5, 7.5), 
+                     breaks = c(-5,-2.5, 0, 2.5, 5, 7.5),
+                     minor_breaks = NULL,
+                     labels = c(-5, -2.5, 0, 2.5, 5, 7.5)) 
+importance_plot
+
+# Figure 5A: clustering and scaling
+library(NbClust)
+library(clValid)
+library(clustree)
+library(ggplot2)
+library(cluster)
+library(heatmaply)
+library(RColorBrewer)
+library(ComplexUpset)
+
+# Scaling
+scaling_means <- colMeans(df_clust_biomarkers)
+scaling_sd <- apply(df_clust_biomarkers, 2, sd)
+df_clust_biomarkers <- scale(df_clust_biomarkers)
+row.names(df_clust_biomarkers) <- df_clust$identifier 
+df_clust_biomarkers <- as.data.frame(df_clust_biomarkers)
+
+## find best clustering method
+intern <- clValid(df_clust_biomarkers, nClust = 2:10, 
+                  clMethods = c("hierarchical","kmeans","pam"), validation = "internal")
+summary(intern) ## => hierarchical
+
+## Determine optimal number using different max clusters
+p_load(NbClust, clValid, clustree)
+clust <- NbClust(data=as.matrix(df_clust_biomarkers), method="ward.D2", distance = "euclidean",  index = "all",  max.nc = 5)
+clust <- NbClust(data=as.matrix(df_clust_biomarkers), method="ward.D2", distance = "euclidean",  index = "all",  max.nc = 10)
+clust <- NbClust(data=as.matrix(df_clust_biomarkers), method="ward.D2", distance = "euclidean",  index = "all",  max.nc = 15)
+clust <- NbClust(data=as.matrix(df_clust_biomarkers), method="ward.D2", distance = "euclidean",  index = "all",  max.nc = Inf)
+
+## get results
+clust$Cluster_result<-NA
+clust$Cluster_result<-as.factor(clust$Best.partition)
+df_clust$cluster <- clust$Cluster_result
+
+# Compute dissimilarity matrix with euclidean distances
+dev.off()
+d <- dist(df_clust_biomarkers, method = "euclidean")
+res.hc <- hclust(d, method = "ward.D2" )
+grp <- cutree(res.hc, k = 3)
+plot(res.hc, cex = 0.2) 
+rect.hclust(res.hc, k = 3, border = 2:5) 
+
+## Make heatmap
+row.names(df_clust_biomarkers) == df_clust$identifier
+row_ha <- rowAnnotation(Cluster = df_clust$cluster, 
+                        Mortality = df_clust$mort_ICU, 
+                        col = list(Cluster = c("1" = "aquamarine3", "2" = "darkgoldenrod1", "3" = "darkmagenta"),
+                                   Mortality = c("1" = "Red", "0" = "black"))
+                    
+hist_major <- Heatmap(as.matrix(df_clust_biomarkers), 
+                      split = df_clust$cluster, 
+                      column_names_gp = gpar(fontsize = 10),
+                      name = "Scaled\nvalue",
+                      show_column_dend = FALSE,
+                      show_row_names = FALSE,
+                      use_raster= TRUE,
+                      raster_resize_mat = max,
+                      border_gp = gpar(col = "black", lty = 2)) + row_ha
+hist_major
+
+# Figure 5B and figure 5C: PCA plots and hedges g comparing clusters
+# R Code in analogy to the previously described PCA analysis and hedges g heatmap
+
+# Figure 6: see python code
+## Example of testing proportions
+## test distribution mortality clusters in both cohorts
+discovery_cohort_mortality_counts <- c(29, 5, 6)
+validation_cohort_mortality_counts <- c(12, 1, 2)
+
+# Create a contingency table with the class counts in each cohort
+table <- matrix(c(discovery_cohort_mortality_counts, validation_cohort_mortality_counts), nrow = 3)
+colnames(table) <- c("Discovery Cohort", "Validation Cohort")
+rownames(table) <- c("Cluster 1", "Cluster 2", "Cluster 3")
+
+# Perform the Fisher's exact test
+fisher.test(table)
